@@ -1,0 +1,10 @@
+# Azure Load Testing results downloaded locally via Azure CLI
+loadTest/
+*.csv
+
+# JMeter GUI backup/temp files
+*.jmx.bak
+
+# OS
+.DS_Store
+Thumbs.db
