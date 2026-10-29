@@ -1,116 +1,83 @@
-# Azure Load Testing Example
+# k6 Load Test Example
 
-A load testing example using [Azure App Testing](https://azure.microsoft.com/en-us/products/app-testing)'s
-**Azure Load Testing** service — a fully managed, cloud-scale load testing
-service that runs existing Apache JMeter (or Locust) scripts under the
-hood, with no infrastructure to provision or manage.
+[![k6 Load Test](https://github.com/gillersja1/AzureLoadTestingExample/actions/workflows/k6-load-test.yml/badge.svg)](https://github.com/gillersja1/AzureLoadTestingExample/actions/workflows/k6-load-test.yml)
 
-This reuses the same JMeter test plan as the local
-[JMeterLoadTestExample](../JMeterLoadTestExample) project in this
-portfolio, targeting the public [reqres.in](https://reqres.in/) test API,
-but runs it from Azure's managed load-generation engines instead of a
-local machine — and drives it from a GitHub Actions pipeline.
+A load test written as code with [Grafana k6](https://k6.io/), run in GitHub
+Actions with pass/fail thresholds. It's a companion to
+[JMeterLoadTestExample](https://github.com/gillersja1/JMeterLoadTestExample):
+same target API, different tool. JMeter builds the test plan in a GUI as XML;
+k6 writes it in JavaScript.
 
-## Why this repo exists
+## What's being tested
 
-`JMeterLoadTestExample` shows JMeter run locally/in a self-hosted CI
-runner. This project shows the same test plan running through a managed
-cloud service instead — useful context for comparing "run JMeter yourself"
-vs. "let Azure run JMeter for you at scale" (up to 400 engine instances /
-~100,000 virtual users, per Microsoft's published limits).
+`tests/users-load-test.js` simulates users browsing a reqres.in-style users
+API. Each virtual user loops through:
+
+1. `GET /api/users?page=2`: checks status 200, page 2, 6 users
+2. `GET /api/users/:id` for a random user: checks status 200, the right user, an email present
+3. `GET /api/users/999`: checks for a **404**, which is marked as an expected status so it
+   doesn't count as a failed request
+
+Load ramps up to 20 virtual users over 10 s, holds for 30 s, then ramps down,
+with 300 ms of think time between requests.
+
+## Pass/fail thresholds
+
+The thresholds are defined in the script, so the test itself decides whether
+the run passed. k6 exits with a non-zero code when any threshold fails, and
+that fails the CI job.
+
+| Metric | Threshold |
+|---|---|
+| Failed requests | < 1% (and the run **aborts early** above 10%) |
+| Response time | avg < 200 ms, p95 < 500 ms, p99 < 1000 ms |
+| Response time per endpoint (list, single) | p95 < 500 ms |
+| Checks passing | > 99% |
+
+## The target API
+
+`mock-api/server.js` is a small, dependency-free Node server that returns
+the same responses as [reqres.in](https://reqres.in/) for these endpoints.
+reqres.in's free tier allows only 20 requests per minute, so a real load test
+needs its own target. The mock runs inside the CI job. Point the test
+anywhere else with `BASE_URL`.
+
+## Running locally
+
+Requires [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) and Node.js.
+
+```bash
+node mock-api/server.js &                   # target API on :8080
+k6 run tests/users-load-test.js             # 20 VUs, 30 s hold
+k6 run -e VUS=50 -e HOLD=2m tests/users-load-test.js
+k6 run -e BASE_URL=https://staging.example.com tests/users-load-test.js
+```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `BASE_URL` | `http://localhost:8080` | API under test |
+| `VUS` | `20` | Peak virtual users |
+| `RAMP_UP` | `10s` | Time to reach peak |
+| `HOLD` | `30s` | Time at peak |
+| `THINK_TIME` | `0.3` | Seconds between requests |
+
+## CI/CD
+
+`.github/workflows/k6-load-test.yml` runs on pushes to `main`, on pull
+requests that touch the test, the mock API or the workflow, and on demand
+(**Actions → k6 Load Test → Run workflow**, with `vus` and `hold` inputs).
+
+Each run produces:
+
+- **Job summary:** request count, error rate, latency, and a pass/fail table for every threshold
+- **`k6-reports` artifact:** an HTML dashboard report (`k6-report.html`) and the raw summary (`k6-summary.json`)
 
 ## Project structure
 
 ```
-AzureLoadTestingExample/
-├── test-plans/
-│   └── reqres-api-load-test.jmx   # Same JMeter script as JMeterLoadTestExample,
-│                                   # with local listeners removed (Azure Load
-│                                   # Testing provides its own metrics dashboard)
-├── loadtest-config.yaml            # Azure Load Testing test configuration
-└── .github/workflows/azure-load-test.yml
+├── tests/
+│   └── users-load-test.js          # k6 test: scenario, checks, thresholds, summary
+├── mock-api/
+│   └── server.js                   # Local reqres-compatible target API
+└── .github/workflows/k6-load-test.yml
 ```
-
-## One-time Azure setup
-
-You'll need an Azure subscription. Using the Azure CLI:
-
-```bash
-# 1. Install the load testing CLI extension
-az extension add --name load
-
-# 2. Create a resource group (skip if you already have one)
-az group create --name loadtest-portfolio-rg --location eastus
-
-# 3. Create the Azure Load Testing resource
-az load create \
-  --name loadtest-portfolio \
-  --resource-group loadtest-portfolio-rg \
-  --location eastus
-
-# 4. Create a service principal scoped to just this resource, with the
-#    "Load Test Contributor" role, for GitHub Actions to authenticate with
-loadtest_id=$(az resource show \
-  --resource-group loadtest-portfolio-rg \
-  --name loadtest-portfolio \
-  --resource-type "Microsoft.LoadTestService/loadtests" \
-  --query id -o tsv)
-
-az ad sp create-for-rbac \
-  --name "github-actions-loadtest" \
-  --role "Load Test Contributor" \
-  --scopes "$loadtest_id" \
-  --sdk-auth
-```
-
-The last command prints a JSON object — save the whole thing.
-
-## GitHub setup
-
-1. **Repository secret** — Settings → Secrets and variables → Actions → Secrets:
-   - `AZURE_CREDENTIALS`: the full JSON output from `az ad sp create-for-rbac` above
-
-2. **Repository variables** — Settings → Secrets and variables → Actions → Variables:
-   - `AZURE_LOAD_TEST_RESOURCE`: `loadtest-portfolio` (or whatever you named it)
-   - `AZURE_LOAD_TEST_RESOURCE_GROUP`: `loadtest-portfolio-rg`
-
-3. Push to `main`, or trigger manually from **Actions → Azure Load Testing → Run workflow**.
-
-## What's in `loadtest-config.yaml`
-
-- **`testPlan` / `testType: JMX`** — points at the JMeter script; Azure Load Testing runs it directly, no conversion needed
-- **`engineInstances`** — how many parallel JMeter engines Azure spins up; each runs the full thread group from the script, so this is your horizontal scaling knob
-- **`failureCriteria`** — the test run is marked failed if average response time exceeds 1000ms, error rate exceeds 10%, or p95 response time exceeds 2000ms
-- **`autoStop`** — automatically stops the run early if the error rate exceeds 90% within any 60-second window, to avoid burning engine-hours on a broken run
-
-## Running it yourself (without CI)
-
-You can also trigger a run directly from the Azure CLI:
-
-```bash
-az load test create \
-  --load-test-resource loadtest-portfolio \
-  --resource-group loadtest-portfolio-rg \
-  --test-id reqres-api-load-test \
-  --load-test-config-file loadtest-config.yaml
-
-az load test-run create \
-  --load-test-resource loadtest-portfolio \
-  --resource-group loadtest-portfolio-rg \
-  --test-id reqres-api-load-test \
-  --test-run-id reqres-run-$(date +%s)
-```
-
-Or use the [Azure Load Testing extension for VS Code](https://go.microsoft.com/fwlink/?linkid=2317015)
-to author and run tests directly from your editor.
-
-Results — including per-request percentiles, error rates, and (for
-Azure-hosted targets) server-side resource metrics — show up in the
-Azure Load Testing dashboard in the portal.
-
-## Possible extensions
-
-- Add `appComponents` to `loadtest-config.yaml` to monitor server-side metrics if you point this at an Azure-hosted app instead of the public reqres.in API
-- Add `regionalLoadTestConfig` to generate load from multiple Azure regions simultaneously, simulating realistic geographic traffic
-- Parameterize threads/ramp-up/loops via a `user.properties` file referenced in `properties.userPropertyFile`, instead of relying on the JMX's built-in defaults
-- Add a private endpoint test using `subnetId` if testing an internal, non-public application
