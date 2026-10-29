@@ -1,9 +1,7 @@
-# Azure Load Testing results downloaded locally via Azure CLI
-loadTest/
-*.csv
-
-# JMeter GUI backup/temp files
-*.jmx.bak
+# k6 output written by handleSummary and the web dashboard export
+k6-summary.json
+k6-summary.md
+k6-report.html
 
 # OS
 .DS_Store

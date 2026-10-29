@@ -1,0 +1,65 @@
+name: k6 Load Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      vus:
+        description: 'Peak number of virtual users'
+        required: false
+        default: '20'
+      hold:
+        description: 'How long to hold peak load (e.g. 30s, 2m)'
+        required: false
+        default: '30s'
+  push:
+    branches: [main]
+    paths:
+      - 'tests/**'
+      - 'mock-api/**'
+      - '.github/workflows/k6-load-test.yml'
+  pull_request:
+    paths:
+      - 'tests/**'
+      - 'mock-api/**'
+      - '.github/workflows/k6-load-test.yml'
+
+jobs:
+  load-test:
+    name: Run k6 Load Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The target runs inside the job, so the test can apply real load
+      # without hitting a shared, rate-limited public API.
+      - name: Start mock API
+        run: |
+          node mock-api/server.js 8080 &
+          for i in $(seq 1 30); do curl -sf http://localhost:8080/health && exit 0; sleep 1; done
+          echo "::error::Mock API did not start"; exit 1
+
+      - name: Set up k6
+        uses: grafana/setup-k6-action@v1
+
+      # k6 exits non-zero if any threshold in the script fails, which fails the job.
+      - name: Run load test
+        env:
+          VUS: ${{ github.event.inputs.vus || '20' }}
+          HOLD: ${{ github.event.inputs.hold || '30s' }}
+          K6_WEB_DASHBOARD: 'true'
+          K6_WEB_DASHBOARD_EXPORT: k6-report.html
+        run: k6 run tests/users-load-test.js
+
+      - name: Add results to job summary
+        if: always()
+        run: '[ -f k6-summary.md ] && cat k6-summary.md >> "$GITHUB_STEP_SUMMARY" || true'
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-reports
+          path: |
+            k6-report.html
+            k6-summary.json
+          if-no-files-found: ignore
