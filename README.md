@@ -1,6 +1,6 @@
 # k6 Load Test Example
 
-[![k6 Load Test](https://github.com/gillersja1/AzureLoadTestingExample/actions/workflows/k6-load-test.yml/badge.svg)](https://github.com/gillersja1/AzureLoadTestingExample/actions/workflows/k6-load-test.yml)
+[![k6 Load Test](https://github.com/gillersja1/K6LoadTestExample/actions/workflows/k6-load-test.yml/badge.svg)](https://github.com/gillersja1/K6LoadTestExample/actions/workflows/k6-load-test.yml)
 
 A load test written as code with [Grafana k6](https://k6.io/), run in GitHub
 Actions with pass/fail thresholds. It's a companion to

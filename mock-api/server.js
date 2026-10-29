@@ -29,7 +29,7 @@ const users = names.map(([first, last], i) => ({
 }));
 
 const support = {
-  url: 'https://github.com/gillersja1/AzureLoadTestingExample',
+  url: 'https://github.com/gillersja1/K6LoadTestExample',
   text: 'Local mock of the reqres.in users API for load testing.',
 };
 
