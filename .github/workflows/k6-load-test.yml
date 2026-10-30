@@ -50,6 +50,15 @@ jobs:
           K6_WEB_DASHBOARD_EXPORT: k6-report.html
         run: k6 run tests/users-load-test.js
 
+      - name: Send test results to Grafana
+        if: always()
+        uses: gillersja1/test-results-otel@v1
+        with:
+          results: k6-summary.json
+          suite: load
+          otlp-endpoint: ${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT }}
+          otlp-headers: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
+
       - name: Add results to job summary
         if: always()
         run: '[ -f k6-summary.md ] && cat k6-summary.md >> "$GITHUB_STEP_SUMMARY" || true'
